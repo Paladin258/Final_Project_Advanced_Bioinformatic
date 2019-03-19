@@ -6,3 +6,6 @@ that are associated with genes that are important for eye or wing development. F
 development while eya is associated with Eye development. Gene ontology was also done to get a bigger of each gene list that
 was specific to either eye dics and wing dics samples. There are other ways to analyze data as I could analyze the differences
 among the phenotypes. Overall, in terms of eye and wing dics, there are clear opening regions that are specific to one another.
+
+![Volcano plot]
+(https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Peak%20Annotation.png)
