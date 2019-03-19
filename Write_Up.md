@@ -8,7 +8,7 @@ was specific to either eye dics and wing dics samples. There are other ways to a
 among the phenotypes. Overall, in terms of eye and wing dics, there are clear opening regions that are specific to one another.
 
 ![Volcano plot]
-https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Volcano%20plot.png
+(https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Volcano%20plot.png)
 
 ![Peak Annotation pie chart](https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Peak%20Annotation.png)
 
@@ -19,4 +19,4 @@ https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Pr
 (https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Genome_Track_eya.png)
 
 ![gene ontology]
-https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Gene_Ontology.png
+(https://github.com/Paladin258/Final_Project_Advanced_Bioinformatic/blob/Final_Project_Version1/Gene_Ontology.png)
