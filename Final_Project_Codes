@@ -1,0 +1,287 @@
+#!/bin/bash
+
+
+#$ -N index
+#$ -q abio
+#$ -pe openmp 8
+#$ -ckpt restart
+
+module load bwa/0.7.8
+
+ref="/dfs3/bio/namvn1/class/ref_new/dm6.fa"
+bwa index $ref
+
+
+
+
+#### Test files
+
+zcat /pub/namvn1/class/Bioinformatics_Course/ATACseq/ATAC_P004_R1.fq.gz | head -n 1000000 | gzip -c > ATAC_P004.R1.fq.gz
+zcat /pub/namvn1/class/Bioinformatics_Course/ATACseq/ATAC_P004_R2.fq.gz | head -n 1000000 | gzip -c > ATAC_P004_R2.fq.gz
+
+
+
+zcat /pub/namvn1/class/Bioinformatics_Course/ATACseq/ATAC_P005_R1.fq.gz | head -n 1000000 | gzip -c > ATAC_P005.R1.fq.gz
+zcat /pub/namvn1/class/Bioinformatics_Course/ATACseq/ATAC_P005_R2.fq.gz | head -n 1000000 | gzip -c > ATAC_P005_R2.fq.gz
+
+
+
+
+#$ -N test_run
+#$ -q abio
+#$ -pe openmp 4
+#$ -R y
+#$ -t 1-2
+#$ -ckpt restart
+
+module load bwa/0.7.8
+module load samtools/1.9
+module load bcftools/1.3
+module load enthought_python/7.3.2
+module load gatk/2.4-7
+module load picard-tools/1.87
+module load java/1.7
+
+
+
+folder="/bio/namvn1/class/test_files/bam_files/"
+ref="/bio/namvn1/class/ref/dmel-all-chromosome-r6.13.fasta"
+prefix=`head -n $SGE_TASK_ID ATACseq.prefixes.txt | tail -n 1`
+bwa mem -t 8 -M $ref ${prefix}_R1.fq.gz ${prefix}_R2.fq.gz | samtools view -bS - > $folder/${prefix}.bam
+samtools sort $folder/${prefix}.bam -o $folder/${prefix}_sort.bam
+java -Xmx20g -jar /data/apps/picard-tools/1.87/AddOrReplaceReadGroups.jar I=$folder/${prefix}_sort.bam \
+O=$folder/${prefix}.RG.bam SORT_ORDER=coordinate RGPL=illumina RGPU=D109LACXX RGLB=Lib1 RGID=${prefix} RGSM=${prefix} VALIDATION_STRINGENCY=LENIENT
+samtools index $folder/${prefix}.RG.bam
+
+
+
+####################### Run ATAC-seq files
+
+ls ATAC*_R1.fq.gz | sed 's/_R1.fq.gz//' > ATACseq.prefixes.txt
+
+
+#$ -N ATAC
+#$ -q free64
+#$ -pe openmp 32
+#$ -R y
+#$ -t 1-24
+#$ -ckpt restart
+
+
+module load bwa/0.7.8
+module load samtools/1.9
+module load picard-tools/1.87
+module load java/1.7
+
+input="/dfs3/bio/namvn1/class/ATACseq/"
+output="/dfs3/bio/namvn1/class/ATACseq/bam_files"
+ref="/dfs3/bio/namvn1/class/ref/dmel-all-chromosome-r6.13.fasta"
+prefix=`head -n $SGE_TASK_ID ATACseq.prefixes.txt | tail -n 1`
+
+bwa mem -t 8 -M $ref $input/${prefix}_R1.fq.gz $input/${prefix}_R2.fq.gz | samtools view -bS - > $output/${prefix}.bam
+samtools sort $output/${prefix}.bam -o $output/${prefix}_sort.bam
+
+java -Xmx2g -jar /data/apps/picard-tools/1.96/MarkDuplicates.jar \
+INPUT=$output/${prefix}_sort.bam \
+OUTPUT=$output/${prefix}_duplicate_remove.bam \
+METRICS_FILE=$output/${prefix}_picard_stats REMOVE_DUPLICATES=true
+
+
+####################################### Make bigwig files
+#$ -N bamTobw_ATAC            
+#$ -q abio128
+#$ -pe openmp 12
+#$ -t 1-24
+#$ -ckpt restart
+
+module load samtools/1.9
+module load namvn1/anaconda3
+
+input="/dfs3/bio/namvn1/class/ATACseq/bam_files/"
+prefix=`head -n $SGE_TASK_ID ATACseq.prefixes.txt | tail -n 1`
+
+samtools index $input/${prefix}_duplicate_remove.bam
+
+bamCoverage -b $input/${prefix}_duplicate_remove.bam \
+ -o {prefix}.bw \
+ -p max \
+ --binSize 50 \
+ --smoothLength 100
+
+########################## MACS2
+
+
+#$ -N MACS2_peak
+#$ -q abio128
+#$ -pe openmp 8
+#$ -t 1-24
+#$ -ckpt restart
+
+module load enthought_python/7.3.2
+
+input="/dfs3/bio/namvn1/class/ATACseq/bam_files"
+output="/dfs3/bio/namvn1/class/ATACseq/MACS2"
+ref="/dfs3/bio/namvn1/class/ref/dmel-all-chromosome-r6.13.fasta"
+prefix_dest="/dfs3/bio/namvn1/class/ATACseq/"
+prefix=`head -n $SGE_TASK_ID $prefix_dest/ATACseq.prefixes.txt | tail -n 1`
+
+
+macs2 callpeak  -t $input/ATAC_P004_duplicate_remove.bam \
+-f BAMPE -g dm --keep-dup all --shift -100 --extsize 200 -n test
+
+
+macs2 callpeak -t $input/${prefix}_duplicate_remove.bam \
+-n ${prefix} \
+-f BAMPE -g dm --shift -100 --extsize 200
+
+
+########################## bedtools coverage
+
+cat *narrow_Peak > ATAC_cat # cat all MACS2 peak files into one big file
+bedtools sort -i ATAC_cat | bedtools merge -i - > ATAC_merge_peak #sort and merge ATAC regions
+
+#$ -N coverage_ATAC
+#$ -pe openmp 8
+#$ -q free64
+#$ -t 1-24
+#$ -ckpt restart
+
+module load bedtools/2.25.0
+b_file="/dfs3/bio/namvn1/class/ATACseq/bam_files/"
+prefix=`head -n $SGE_TASK_ID ATACseq.prefixes.txt | tail -n 1`
+
+bedtools coverage -a  ATAC_merge_peak \
+-b $b_file/${prefix}_duplicate_remove.bam  > ${prefix}_coverage
+
+
+
+########################################################### Python merge code and RPKM
+
+import numpy as np
+import pandas as pd
+import glob
+
+
+#specify a pattern of the file and pass it as a parameter into a glob function
+csv_files = glob.glob('ATAC_*coverage')
+#intialize empty list that we will append dataframes to
+list_data = []
+#write a for loop that will go through each of the file name through globbing and the end result 
+#will be the list of dataframes
+for filename in csv_files:
+    data = pd.read_csv(filename,sep='\t', names = ["Chromosome", "Start", "End", filename,"NA1", "Length", "NA3"])
+    data=data.drop(['NA1', 'NA3'], axis=1)
+    data[filename] = data[filename]+ 0.1
+    list_data.append(data)
+df=reduce(lambda x, y: pd.merge(x, y, on = ['Chromosome','Start','End','Length']), list_data)
+index = ['Chromosome','Start','End','Length']
+index = index + csv_files
+df = df[index]
+
+
+#calculate RPKM
+
+for filename in csv_files:
+    total_reads = np.sum(df[filename],axis=0)
+    scale_factor = np.multiply((df['Length']), total_reads )/ 1000000000
+    df[filename]=np.divide((df[filename]), scale_factor)
+
+index_col={'ID':(range(1,len(df)+1))}
+index_col = pd.DataFrame(index_col)
+df = df.join(index_col['ID'])
+df.to_csv('ATAC_RPKM', sep='\t', index=False)
+
+
+
+
+
+
+############################################################ R Codes 
+
+
+####################### Edge R
+
+library(edgeR)
+
+group=factor(c(1,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2))  
+
+data=read.delim("ATAC_RPKM", row.names = "ID")
+
+
+
+y=data[ ,c(5,7,10,11,12,13,14,15,20,21,23,27,6,8,9,16,17,18,19,22,24,25,26,28)]    # the gene Symbol column is numbered 0 and the actual data starts from column number 1.  
+
+z=DGEList(counts=y, group=group)
+
+z=calcNormFactors(z)
+
+z=estimateCommonDisp(z)
+
+z=estimateTagwiseDisp(z)  # if no BR for either condition, omit this.
+
+et1=exactTest(z)  # if no BR, add ", dispersion=value"(omit the quotation marks) into paretheses.  Value can be set arbitarily to 0.01 - 0.16 (0.1^2 - 0.4^2)   
+
+topTags(et1, n=10000)
+
+results=topTags(et1, n=10000)  #  in the result, negative FC means value in condition 2 is lower than that in condition 1
+
+
+top_results_low = subset(results$table, PValue<.05 & logFC < -2  )
+top_results_high = subset(results$table, PValue<.05 & logFC > 2  )
+
+
+top_data_high <- subset(data, row.names(data) %in% row.names(top_results_high))
+top_data_low <- subset(data, row.names(data) %in% row.names(top_results_low))
+
+write.table(top_data_high, "ED_high_ATAC", sep='\t', row.names = FALSE)
+write.table(top_data_low, "WD_high_ATAC", sep='\t', row.names = FALSE)
+
+
+
+####################### Volcano Plot 
+
+library(ggplot2)
+library(corrplot)
+library(tidyverse)
+
+
+mydata<-results$table %>% 
+  mutate(Categories = ifelse(logFC >= 2,"Open Regions for Eye", ifelse(logFC<=-2 , "Open Regions for Wing", "Over lap Open Regions")))
+ggplot(mydata, aes(x=logFC, y= -log10(PValue))) +
+  theme_bw(base_size = 15) +
+  ggtitle("Eye vs Wing specific open regions") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20, face="bold",
+                                  color = "black")) +
+  
+  geom_point(aes(colour = Categories), size=1.5) +
+  scale_colour_manual(values = c("Open Regions for Eye"= "dark cyan", "Open Regions for Wing"="dark red",  "Over lap Open Regions"= "grey"))
+
+
+####################### Peak Annocation with Peak seeker
+
+library(ChIPseeker)
+library(TxDb.Dmelanogaster.UCSC.dm6.ensGene)
+txdb <- TxDb.Dmelanogaster.UCSC.dm6.ensGene
+library(clusterProfiler)
+library(org.Dm.eg.db)
+
+
+## Read peak files and plot pie graph
+
+
+peakAnno_WD_high <- annotatePeak("WD_high_ATAC", tssRegion=c(-2500, 2500),
+                                    TxDb=txdb, annoDb="org.Dm.eg.db")
+plotAnnoPie(peakAnno_WD_high)
+
+
+peakAnno_ED_high <- annotatePeak("ED_high_ATAC", tssRegion=c(-2500, 2500),
+                                 TxDb=txdb, annoDb="org.Dm.eg.db")
+plotAnnoPie(peakAnno_ED_high)
+
+
+## Data Summary and Save
+peak_WD <- as.data.frame(peakAnno_WD_high)
+write.table(peak_WD, "WD_gene_annotation", sep ="\t", row.names = F)
+
+peak_ED <- as.data.frame(peakAnno_ED_high)
+write.table(peak_ED, "ED_gene_annotation", sep ="\t", row.names = F)
